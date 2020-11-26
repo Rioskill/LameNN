@@ -26,40 +26,12 @@ class Neuron:
         if self.bias is None:
             self.bias = np.random.normal()
 
-    def get_val(self, inputs):
+    def get_input(self, inputs):
         return np.dot(self.weights, inputs) + self.bias
-        # return self.weights[0] * inputs[0] + self.weights[1] * inputs[1] + self.bias
 
     def feedforward(self, inputs):
         # np.dot - вычисляем скалярное произведение массивов
-        return sigmoid(self.get_val(inputs))
-
-    def train(self, inputs, d_L_d_ypred, d_ypred_d_neuron):
-
-        learn_rate = 0.1
-
-        val = self.get_val(inputs)
-        # значение без сигмоиды
-
-        deriv_sigmoid_val = deriv_sigmoid(val)
-
-        d_val_d_weight_1 = inputs[0] * deriv_sigmoid_val
-        d_val_d_weight_2 = inputs[1] * deriv_sigmoid_val
-        # как зависит значение от 1 и 2 весов соответственно
-
-        d_val_d_bias = deriv_sigmoid_val
-
-        tmp = learn_rate * d_L_d_ypred * d_ypred_d_neuron
-
-        weight_1 = self.weights[0] - tmp * d_val_d_weight_1
-        weight_2 = self.weights[1] - tmp * d_val_d_weight_2
-        self.weights = np.array([weight_1, weight_2])
-
-        self.bias -= tmp * d_val_d_bias
-
-        d_val_d_input_1 = self.weights[0] * deriv_sigmoid_val
-        d_val_d_input_2 = self.weights[1] * deriv_sigmoid_val
-        return d_val_d_input_1, d_val_d_input_2
+        return sigmoid(self.get_input(inputs))
 
 
 class NeuralNetwork:
@@ -70,15 +42,16 @@ class NeuralNetwork:
 
         self.h1 = Neuron()
         self.h2 = Neuron()
-        self.o1 = Neuron()
+
+        self.o = Neuron()
 
     def feedforward(self, x):
         out_h1 = self.h1.feedforward(x)
         out_h2 = self.h2.feedforward(x)
 
-        out_o1 = self.o1.feedforward(np.array([out_h1, out_h2]))
+        out_o = self.o.feedforward(np.array([out_h1, out_h2]))
 
-        return out_o1
+        return out_o
 
     def train(self, data, y_trues, epochs=1000):
         learn_rate = 0.1
@@ -86,19 +59,52 @@ class NeuralNetwork:
         for epoch in range(epochs):
             for inputs, y_true in zip(data, y_trues):
 
-                h1_val = self.h1.feedforward(inputs)
-                h2_val = self.h2.feedforward(inputs)
+                h1_input = self.h1.get_input(inputs)
+                h1_output = sigmoid(h1_input)
 
-                o1_inputs = np.array([h1_val, h2_val])
-                o1_val = self.o1.feedforward(o1_inputs)
-                y_pred = o1_val
+                h2_input = self.h2.get_input(inputs)
+                h2_output = sigmoid(h2_input)
 
-                d_L_d_ypred = -2 * (y_true - y_pred)
+                o_inputs = np.array([h1_output, h2_output])
+                o_input = self.o.get_input(o_inputs)
+                o_output = sigmoid(o_input)
 
-                d_ypred_d_h1, d_ypred_d_h2 = self.o1.train([h1_val, h2_val], d_L_d_ypred, 1)
+                error = ((y_true - o_output) ** 2)
 
-                self.h1.train(inputs, d_L_d_ypred, d_ypred_d_h1)
-                self.h2.train(inputs, d_L_d_ypred, d_ypred_d_h2)
+                d_o = (y_true - o_output) * deriv_sigmoid(o_output)
+
+                w5, w6 = self.o.weights
+
+                d_h1 = w5 * d_o * deriv_sigmoid(h1_output)
+
+                d_h2 = w6 * d_o * deriv_sigmoid(h2_output)
+
+                GRAD_w5 = h1_output * d_o
+                GRAD_w6 = h2_output * d_o
+
+                w5 += GRAD_w5 * learn_rate
+                w6 += GRAD_w6 * learn_rate
+
+                self.o.weights = np.array([w5, w6])
+
+                w1, w3 = self.h1.weights
+                w2, w4 = self.h2.weights
+
+                x1_output, x2_output = inputs
+
+                GRAD_w1 = x1_output * d_h1
+                GRAD_w2 = x1_output * d_h2
+                GRAD_w3 = x2_output * d_h1
+                GRAD_w4 = x2_output * d_h2
+
+                w1 += GRAD_w1 * learn_rate
+                w2 += GRAD_w2 * learn_rate
+                w3 += GRAD_w3 * learn_rate
+                w4 += GRAD_w4 * learn_rate
+
+                self.h1.weights = np.array([w1, w3])
+                self.h2.weights = np.array([w2, w4])
+
 
             if epoch % 10 == 0:
                 y_preds = np.apply_along_axis(self.feedforward, 1, data)
