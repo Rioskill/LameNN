@@ -17,94 +17,88 @@ def mse_loss(y_true, y_pred):
 
 
 class Neuron:
-    def __init__(self, weights=None, bias=None):
-        self.weights = weights   # веса
-        self.bias = bias         # смещение
-
-        if self.weights is None:
-            self.weights = np.array([np.random.normal(), np.random.normal()])
-        if self.bias is None:
-            self.bias = np.random.normal()
+    def __init__(self, weights_amount):
+        self.weights = np.array([np.random.normal() for i in range(weights_amount)])
+        # self.bias = np.random.normal()
 
     def get_input(self, inputs):
-        return np.dot(self.weights, inputs) + self.bias
+        return np.dot(self.weights, inputs)
 
     def feedforward(self, inputs):
         # np.dot - вычисляем скалярное произведение массивов
         return sigmoid(self.get_input(inputs))
 
+    def train(self, input_neuron_outputs, self_d, learn_rate):
+
+        GRADs = np.array([input_neuron_output * self_d for input_neuron_output in input_neuron_outputs])
+        self.weights += GRADs * learn_rate
+        input_neuron_ds = np.array([weight * self_d * deriv_sigmoid(input_neuron_output)
+                                    for weight, input_neuron_output
+                                    in zip(self.weights, input_neuron_outputs)])
+
+        return np.array(input_neuron_ds)
+
+
+class Layer:
+    def __init__(self, neuron_number, weights_amount):
+        self.neurons = [Neuron(weights_amount) for i in range(neuron_number)]
+
+    def size(self):
+        return len(self.neurons)
+
+    def feedforward(self, inputs):
+        return np.array([neuron.feedforward(inputs) for neuron in self.neurons])
+
+    def train(self, input_neuron_outputs, neuron_ds, learn_rate):
+        res = np.array([0.0 for i in range(len(self.neurons))])
+        for neuron, neuron_d in zip(self.neurons, neuron_ds):
+            res += neuron.train(input_neuron_outputs=input_neuron_outputs,
+                                self_d=neuron_d,
+                                learn_rate=learn_rate)
+        return res
+
 
 class NeuralNetwork:
-
     def __init__(self):
         # weights = np.array([0, 1])
         # bias = 0
 
-        self.h1 = Neuron()
-        self.h2 = Neuron()
+        self.h = Layer(2, 2)
 
-        self.o = Neuron()
+        self.g = Layer(2, 2)
+
+        self.o = Neuron(2)
 
     def feedforward(self, x):
-        out_h1 = self.h1.feedforward(x)
-        out_h2 = self.h2.feedforward(x)
-
-        out_o = self.o.feedforward(np.array([out_h1, out_h2]))
+        out_h = self.h.feedforward(x)
+        out_g = self.g.feedforward(out_h)
+        out_o = self.o.feedforward(out_g)
 
         return out_o
 
-    def train(self, data, y_trues, epochs=1000):
-        learn_rate = 0.1
-
+    def train(self, data, y_trues, epochs=1000, learn_rate=0.01):
         for epoch in range(epochs):
             for inputs, y_true in zip(data, y_trues):
 
-                h1_input = self.h1.get_input(inputs)
-                h1_output = sigmoid(h1_input)
-
-                h2_input = self.h2.get_input(inputs)
-                h2_output = sigmoid(h2_input)
-
-                o_inputs = np.array([h1_output, h2_output])
-                o_input = self.o.get_input(o_inputs)
-                o_output = sigmoid(o_input)
-
-                error = ((y_true - o_output) ** 2)
+                h_output = self.h.feedforward(inputs)
+                g_output = self.g.feedforward(h_output)
+                o_output = self.o.feedforward(g_output)
 
                 d_o = (y_true - o_output) * deriv_sigmoid(o_output)
 
-                w5, w6 = self.o.weights
+                d_gs = self.o.train(input_neuron_outputs=g_output,
+                                    self_d=d_o,
+                                    learn_rate=learn_rate)
 
-                d_h1 = w5 * d_o * deriv_sigmoid(h1_output)
+                d_hs = self.g.train(input_neuron_outputs=h_output,
+                                    neuron_ds=d_gs,
+                                    learn_rate=learn_rate)
 
-                d_h2 = w6 * d_o * deriv_sigmoid(h2_output)
+                # print(d_o, d_gs, d_hs, sep='\n')
 
-                GRAD_w5 = h1_output * d_o
-                GRAD_w6 = h2_output * d_o
-
-                w5 += GRAD_w5 * learn_rate
-                w6 += GRAD_w6 * learn_rate
-
-                self.o.weights = np.array([w5, w6])
-
-                w1, w3 = self.h1.weights
-                w2, w4 = self.h2.weights
-
-                x1_output, x2_output = inputs
-
-                GRAD_w1 = x1_output * d_h1
-                GRAD_w2 = x1_output * d_h2
-                GRAD_w3 = x2_output * d_h1
-                GRAD_w4 = x2_output * d_h2
-
-                w1 += GRAD_w1 * learn_rate
-                w2 += GRAD_w2 * learn_rate
-                w3 += GRAD_w3 * learn_rate
-                w4 += GRAD_w4 * learn_rate
-
-                self.h1.weights = np.array([w1, w3])
-                self.h2.weights = np.array([w2, w4])
-
+                self.h.train(input_neuron_outputs=inputs,
+                             neuron_ds=d_hs,
+                             learn_rate=learn_rate)
 
             if epoch % 10 == 0:
                 y_preds = np.apply_along_axis(self.feedforward, 1, data)
@@ -131,10 +125,10 @@ all_y_trues = np.array([
 
 # Тренируем нашу нейронную сеть!
 network = NeuralNetwork()
-network.train(data, all_y_trues, 1000)
+network.train(data, all_y_trues, 5000, 0.1)
 
 # Make some predictions
-emily = np.array([-7, -3]) # 128 pounds, 63 inches
+emily = np.array([-7, -3])# 128 pounds, 63 inches
 frank = np.array([20, 2])  # 155 pounds, 68 inches
 
 # emily = np.array([128, 63]) # 128 pounds, 63 inches
@@ -150,5 +144,5 @@ def number_to_sex(number):
     return 'M'
 
 
-print("Emily: %.3f" % emily_res, number_to_sex(emily_res)) # 0.951 - F
-print("Frank: %.3f" % frank_res, number_to_sex(frank_res)) # 0.039 - M
+print("Emily: %.3f" % emily_res, number_to_sex(emily_res))
+print("Frank: %.3f" % frank_res, number_to_sex(frank_res))
