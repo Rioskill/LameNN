@@ -22,7 +22,7 @@ class Neuron:
         self.bias = np.random.normal()
 
     def get_input(self, inputs):
-        return np.dot(self.weights, inputs)# + self.bias
+        return np.dot(self.weights, inputs)   # + self.bias
 
     def feedforward(self, inputs):
         # np.dot - вычисляем скалярное произведение массивов
@@ -55,12 +55,12 @@ class Layer:
         return np.array([neuron.feedforward(inputs) for neuron in self.neurons])
 
     def train(self, input_neuron_outputs, neuron_ds, learn_rate):
-        res = np.array([0.0 for i in range(len(input_neuron_outputs))])
+        d_previous_layer = np.array([0.0 for i in range(len(input_neuron_outputs))])
         for neuron, neuron_d in zip(self.neurons, neuron_ds):
-            res += neuron.train(input_neuron_outputs=input_neuron_outputs,
-                                self_d=neuron_d,
-                                learn_rate=learn_rate)
-        return res
+            d_previous_layer += neuron.train(input_neuron_outputs=input_neuron_outputs,
+                                             self_d=neuron_d,
+                                             learn_rate=learn_rate)
+        return d_previous_layer
 
 
 class NeuralNetwork:
@@ -115,14 +115,6 @@ def make_network(input_size, layers_sizes):
     return NeuralNetwork(neuron_layers)
 
 
-# Определение набора данных
-# data = np.array([
-#     [-2, -1],  # Alice
-#     [25, 6],  # Bob
-#     [17, 4],  # Charlie
-#     [-15, -6],  # Diana
-# ])
-
 data = np.array([[133, 65], [160, 72], [152, 70], [120, 60]])
 
 all_y_trues = np.array([
@@ -132,17 +124,9 @@ all_y_trues = np.array([
     1,  # Diana
 ])
 
-
-
-
-
 # Тренируем нашу нейронную сеть!
 network = make_network(2, [20, 20])
 network.train(data, all_y_trues, 5000, 0.005)
-
-# Make some predictions
-# emily = np.array([-7, -3])# 128 pounds, 63 inches
-# frank = np.array([20, 2])  # 155 pounds, 68 inches
 
 emily = np.array([128, 63])  # 128 pounds, 63 inches
 frank = np.array([155, 68])  # 155 pounds, 68 inches
