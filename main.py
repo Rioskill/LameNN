@@ -1,6 +1,8 @@
 import numpy as np
 
 
+alpha = 0.1
+
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))   # np.exp - считаем экспоненту
 
@@ -21,8 +23,10 @@ class Neuron:
         self.weights = np.array([np.random.normal() for i in range(weights_amount)])
         self.bias = np.random.normal()
 
+        self.last_deltas = np.array([0 for i in range(weights_amount)])
+
     def get_input(self, inputs):
-        return np.dot(self.weights, inputs)   # + self.bias
+        return np.dot(self.weights, inputs) # + self.bias
 
     def feedforward(self, inputs):
         # np.dot - вычисляем скалярное произведение массивов
@@ -32,10 +36,11 @@ class Neuron:
 
         GRADs = np.array([input_neuron_output * self_d for input_neuron_output in input_neuron_outputs])
 
-        self.weights += GRADs * learn_rate
+        self.last_deltas = GRADs * learn_rate + alpha * self.last_deltas
+        self.weights += self.last_deltas
 
-        biasGRAD = self.bias * self_d
-        self.bias += biasGRAD * learn_rate
+        # biasGRAD = self.bias * self_d
+        # self.bias += biasGRAD * learn_rate
 
         input_neuron_ds = np.array([weight * self_d * deriv_sigmoid(input_neuron_output)
                                     for weight, input_neuron_output
