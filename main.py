@@ -19,10 +19,10 @@ def mse_loss(y_true, y_pred):
 class Neuron:
     def __init__(self, weights_amount):
         self.weights = np.array([np.random.normal() for i in range(weights_amount)])
-        # self.bias = np.random.normal()
+        self.bias = np.random.normal()
 
     def get_input(self, inputs):
-        return np.dot(self.weights, inputs)
+        return np.dot(self.weights, inputs) + self.bias
 
     def feedforward(self, inputs):
         # np.dot - вычисляем скалярное произведение массивов
@@ -31,7 +31,12 @@ class Neuron:
     def train(self, input_neuron_outputs, self_d, learn_rate):
 
         GRADs = np.array([input_neuron_output * self_d for input_neuron_output in input_neuron_outputs])
+
         self.weights += GRADs * learn_rate
+
+        biasGRAD = self.bias * self_d
+        self.bias += biasGRAD * learn_rate
+
         input_neuron_ds = np.array([weight * self_d * deriv_sigmoid(input_neuron_output)
                                     for weight, input_neuron_output
                                     in zip(self.weights, input_neuron_outputs)])
@@ -40,7 +45,7 @@ class Neuron:
 
 
 class Layer:
-    def __init__(self, neuron_number, weights_amount):
+    def __init__(self, weights_amount, neuron_number):
         self.neurons = [Neuron(weights_amount) for i in range(neuron_number)]
 
     def size(self):
@@ -50,7 +55,7 @@ class Layer:
         return np.array([neuron.feedforward(inputs) for neuron in self.neurons])
 
     def train(self, input_neuron_outputs, neuron_ds, learn_rate):
-        res = np.array([0.0 for i in range(len(self.neurons))])
+        res = np.array([0.0 for i in range(len(input_neuron_outputs))])
         for neuron, neuron_d in zip(self.neurons, neuron_ds):
             res += neuron.train(input_neuron_outputs=input_neuron_outputs,
                                 self_d=neuron_d,
@@ -63,11 +68,11 @@ class NeuralNetwork:
         # weights = np.array([0, 1])
         # bias = 0
 
-        self.h = Layer(2, 2)
+        self.h = Layer(2, 40)
 
-        self.g = Layer(2, 2)
+        self.g = Layer(40, 20)
 
-        self.o = Neuron(2)
+        self.o = Neuron(20)
 
     def feedforward(self, x):
         out_h = self.h.feedforward(x)
@@ -90,6 +95,7 @@ class NeuralNetwork:
                                     self_d=d_o,
                                     learn_rate=learn_rate)
 
+                # print(h_output.shape, d_gs.shape)
                 d_hs = self.g.train(input_neuron_outputs=h_output,
                                     neuron_ds=d_gs,
                                     learn_rate=learn_rate)
@@ -114,7 +120,7 @@ data = np.array([
     [-15, -6],  # Diana
 ])
 
-# data = np.array([[133, 65], [160, 72], [152, 70], [120, 60]])
+data = np.array([[133, 65], [160, 72], [152, 70], [120, 60]])
 
 all_y_trues = np.array([
     1,  # Alice
@@ -125,14 +131,14 @@ all_y_trues = np.array([
 
 # Тренируем нашу нейронную сеть!
 network = NeuralNetwork()
-network.train(data, all_y_trues, 5000, 0.1)
+network.train(data, all_y_trues, 5000, 0.01)
 
 # Make some predictions
-emily = np.array([-7, -3])# 128 pounds, 63 inches
-frank = np.array([20, 2])  # 155 pounds, 68 inches
+# emily = np.array([-7, -3])# 128 pounds, 63 inches
+# frank = np.array([20, 2])  # 155 pounds, 68 inches
 
-# emily = np.array([128, 63]) # 128 pounds, 63 inches
-# frank = np.array([155, 68])  # 155 pounds, 68 inches
+emily = np.array([128, 63]) # 128 pounds, 63 inches
+frank = np.array([155, 68])  # 155 pounds, 68 inches
 
 emily_res = network.feedforward(emily)
 frank_res = network.feedforward(frank)
