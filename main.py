@@ -1,5 +1,7 @@
 import numpy as np
 import sys
+from multiprocessing import Pool
+from itertools import repeat
 
 
 class ProgressBar:
@@ -87,9 +89,11 @@ def train_neuron(data):
     neuron_d = data[2]
     learn_rate = data[3]
 
-    return neuron.train(input_neuron_outputs=input_neuron_outputs,
-                        self_d=neuron_d,
-                        learn_rate=learn_rate)
+    ds = neuron.train(input_neuron_outputs=input_neuron_outputs,
+                      self_d=neuron_d,
+                      learn_rate=learn_rate)
+
+    return neuron, ds
 
 
 class Layer:
@@ -104,14 +108,19 @@ class Layer:
 
     def train(self, input_neuron_outputs, neuron_ds, learn_rate):
         d_previous_layer = np.array([0.0 for i in range(len(input_neuron_outputs))])
-        for neuron, neuron_d in zip(self.neurons, neuron_ds):
-            d_previous_layer += neuron.train(input_neuron_outputs=input_neuron_outputs,
-                                             self_d=neuron_d,
-                                             learn_rate=learn_rate)
+        # for neuron, neuron_d in zip(self.neurons, neuron_ds):
+        #     d_previous_layer += neuron.train(input_neuron_outputs=input_neuron_outputs,
+        #                                      self_d=neuron_d,
+        #                                      learn_rate=learn_rate)
 
+        pool_res = pool.map(train_neuron, zip(self.neurons, repeat(input_neuron_outputs), neuron_ds, repeat(learn_rate)))
 
+        self.neurons = []
 
-        # d_previous_layer = sum(pool.map(train_neuron, zip(self.neurons, [input_neuron_outputs] * len(self.neurons), neuron_ds, [learn_rate] * len(self.neurons))))
+        for neuron, ds in pool_res:
+            self.neurons.append(neuron)
+            d_previous_layer += ds
+
         return d_previous_layer
 
 
@@ -210,11 +219,13 @@ data_file = open('./mnist_test/mnist_train.csv','r')
 training_list = data_file.readlines()
 data_file.close()
 
+
+
 dataset = list()
 trues = list()
 print("making dataset")
 
-for record in training_list[:100]:
+for record in training_list[:1000]:
     all_values = record.split(',')
     inputs = (np.asfarray(all_values[1:]) / 255.0 * 0.99) + 0.01
     targets = np.zeros(10) + 0.01
@@ -226,10 +237,14 @@ for record in training_list[:100]:
 dataset = np.array(dataset)
 trues = np.array(trues)
 
-network = make_network(784, [10], 10)
+network = make_network(784, [20, 20], 10)
 
 print("training network")
+
+pool = Pool()
 network.train(dataset, trues, 20, 0.1)
+
+pool.close()
 
 print("training done")
 
@@ -245,12 +260,23 @@ def get_number(network_output):
 
 
 test_file = open('./mnist_test/mnist_test.csv', 'r')
-test_lines = test_file.readlines()[:50]
+test_lines = test_file.readlines()
 test_file.close()
+
+right_guesses = 0
+all_guesses = len(test_lines)
 
 for line in test_lines:
     arr = line.split(',')
-    target = arr[0]
+    target = int(arr[0])
     inputs = np.asfarray(arr[1:])
-    res = network.feedforward(inputs)
-    print("res: " + str(get_number(res)), res, "answer: " + str(target), sep="\n")
+    guess = network.feedforward(inputs)
+    guessed_number = get_number(guess)
+
+    # print(guessed_number, target, guessed_number == target)
+    if guessed_number == target:
+        right_guesses += 1
+
+    # print("res: " + str(get_number(res)), res, "answer: " + str(target), sep="\n")
+
+print(str(right_guesses) + '/' + str(all_guesses), str(right_guesses / all_guesses * 100) + '%')
