@@ -1,52 +1,40 @@
 import numpy as np
 import sys
-from multiprocessing import Pool
 from itertools import repeat
+from numba import njit, float64
+from numba import cuda
+import math
 
-
-class ProgressBar:
-    def __init__(self, real_width, data_width):
-        self.width = real_width
-        self.data_batch_width = data_width // real_width
-        self.it = 0
-
-    def begin(self):
-        self.it = 0
-        sys.stdout.write("[%s]" % (" " * self.width))
-        sys.stdout.flush()
-        sys.stdout.write("\b" * (self.width + 1))
-
-    def update(self):
-        if self.it % self.data_batch_width == 0:
-            sys.stdout.write("-")
-
-            number_of_lines = int(self.it // self.data_batch_width)
-            number_of_spaces = self.width - number_of_lines - 1
-
-            counter = '[' + str(self.it + self.data_batch_width) + '/' + str(self.width * self.data_batch_width) + ']'
-
-            sys.stdout.write(" " * number_of_spaces + ']')
-            sys.stdout.write("\b" * (self.width - number_of_lines + len(counter)))
-            sys.stdout.flush()
-        self.it += 1
-
-    def close(self):
-        sys.stdout.write("]\n")  # this ends the progress bar
+from paint import Paint
 
 
 alpha = 0.1
 
 
+@njit
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))   # np.exp - считаем экспоненту
 
 
+@njit
 def deriv_sigmoid(x):
     # Производная от sigmoid: f'(x) = f(x) * (1 - f(x))
     fx = sigmoid(x)
     return fx * (1 - fx)
 
 
+@cuda.jit(device=True)
+def sigmoid_device(x):
+    return 1 / (1 + math.e ** (-x))
+
+
+@cuda.jit(device=True)
+def deriv_sigmoid_device(x):
+    fx = sigmoid_device(x)
+    return fx * (1 - fx)
+
+
+@njit
 def mse_loss(y_true, y_pred):
     # y_true и y_pred являются массивами numpy с одинаковой длиной
     return ((y_true - y_pred) ** 2).mean()
@@ -55,15 +43,14 @@ def mse_loss(y_true, y_pred):
 class Neuron:
     def __init__(self, weights_amount):
         self.weights = np.array([np.random.normal() for i in range(weights_amount)])
-        self.bias = np.random.normal()
+        # self.bias = np.random.normal()
 
-        self.last_deltas = np.array([0 for i in range(weights_amount)])
+        self.last_deltas = np.array([0.0 for i in range(weights_amount)])
 
     def get_input(self, inputs):
         return np.dot(self.weights, inputs) # + self.bias
 
     def feedforward(self, inputs):
-        # np.dot - вычисляем скалярное произведение массивов
         return sigmoid(self.get_input(inputs))
 
     def train(self, input_neuron_outputs, self_d, learn_rate):
@@ -80,25 +67,29 @@ class Neuron:
                                     for weight, input_neuron_output
                                     in zip(self.weights, input_neuron_outputs)])
 
-        return np.array(input_neuron_ds)
+        return input_neuron_ds
 
 
-def train_neuron(data):
-    neuron = data[0]
-    input_neuron_outputs = data[1]
-    neuron_d = data[2]
-    learn_rate = data[3]
+@cuda.jit(debug=True)
+def train_layer(weights, input_neuron_ds, input_neuron_outputs, neuron_ds, last_deltas, learn_rate):
+    i, j = cuda.grid(2)
+    # for i in range(len(weights)):
+    if i < weights.shape[0]:
+        # for j in range(len(input_neuron_outputs)):
+        if j < weights.shape[1]:
+            GRAD = input_neuron_outputs[j] * neuron_ds[i]
+            last_deltas[i][j] = GRAD * learn_rate + alpha * last_deltas[i][j]
+            weights[i][j] += last_deltas[i][j]
 
-    ds = neuron.train(input_neuron_outputs=input_neuron_outputs,
-                      self_d=neuron_d,
-                      learn_rate=learn_rate)
-
-    return neuron, ds
+            input_neuron_ds[j] = weights[i][j] * neuron_ds[i] * deriv_sigmoid_device(input_neuron_outputs[j])
 
 
 class Layer:
     def __init__(self, weights_amount, neuron_number):
         self.neurons = [Neuron(weights_amount) for i in range(neuron_number)]
+
+        self.device_weights = cuda.to_device(np.array([neuron.weights for neuron in self.neurons]))
+        self.device_last_deltas = cuda.to_device(np.array([neuron.last_deltas for neuron in self.neurons]))
 
     def size(self):
         return len(self.neurons)
@@ -107,19 +98,54 @@ class Layer:
         return np.array([neuron.feedforward(inputs) for neuron in self.neurons])
 
     def train(self, input_neuron_outputs, neuron_ds, learn_rate):
-        d_previous_layer = np.array([0.0 for i in range(len(input_neuron_outputs))])
+        # d_previous_layer = np.array([0.0 for i in range(len(input_neuron_outputs))])
         # for neuron, neuron_d in zip(self.neurons, neuron_ds):
-        #     d_previous_layer += neuron.train(input_neuron_outputs=input_neuron_outputs,
-        #                                      self_d=neuron_d,
-        #                                      learn_rate=learn_rate)
+        #     d_previous_layer += neuron.train(input_neuron_outputs,
+        #                                      neuron_d,
+        #                                      learn_rate)
+        #
+        # return d_previous_layer
 
-        pool_res = pool.map(train_neuron, zip(self.neurons, repeat(input_neuron_outputs), neuron_ds, repeat(learn_rate)))
+        d_previous_layer_device = cuda.to_device(np.zeros(shape=(len(input_neuron_outputs))))
 
-        self.neurons = []
 
-        for neuron, ds in pool_res:
-            self.neurons.append(neuron)
-            d_previous_layer += ds
+        # d_previous_layer = np.array([0.0 for i in range(len(input_neuron_outputs))])
+
+        threads_per_block = (4, 4)
+
+        blocks_per_grid_x = math.ceil(len(self.neurons) / threads_per_block[0])
+        blocks_per_grid_y = math.ceil(len(input_neuron_outputs) / threads_per_block[1])
+        blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
+
+        # print(self.device_weights.shape, (blocks_per_grid[0] * threads_per_block[0], blocks_per_grid[1] * threads_per_block[1]))
+
+        # weights = np.array([np.array(neuron.weights) for neuron in self.neurons])
+        # last_deltas = np.array([np.array(neuron.last_deltas) for neuron in self.neurons])
+
+        train_layer[blocks_per_grid, threads_per_block](
+            self.device_weights,
+            d_previous_layer_device,
+            input_neuron_outputs,
+            neuron_ds,
+            self.device_last_deltas,
+            learn_rate)
+
+        cuda.synchronize()
+
+
+        last_deltas = self.device_last_deltas.copy_to_host()
+        weights = self.device_weights.copy_to_host()
+
+        # print(len(neuron_ds),  weights.shape)
+
+        for i in range(len(self.neurons)):
+            self.neurons[i].last_deltas = last_deltas[i]
+            self.neurons[i].weights = weights[i]
+
+        self.device_weights = cuda.to_device(np.array([neuron.weights for neuron in self.neurons]))
+        self.device_last_deltas = cuda.to_device(np.array([neuron.last_deltas for neuron in self.neurons]))
+
+        d_previous_layer = d_previous_layer_device.copy_to_host()
 
         return d_previous_layer
 
@@ -161,9 +187,9 @@ class NeuralNetwork:
 
                 d_o = np.array(d_o)
 
-                d_layer = (self.o.train(input_neuron_outputs=outputs[-1],
-                                        neuron_ds=d_o,
-                                        learn_rate=learn_rate))
+                d_layer = self.o.train(input_neuron_outputs=outputs[-1],
+                                       neuron_ds=d_o,
+                                       learn_rate=learn_rate)
 
                 for layer, input_neuron_output in zip(self.hidden_layers[::-1], outputs[-2::-1]):
                     d_layer = layer.train(input_neuron_outputs=input_neuron_output,
@@ -172,7 +198,7 @@ class NeuralNetwork:
 
             # self.progress_bar.update()
 
-            #if epoch % 1 == 0:
+            # if epoch % 100 == 0:
             if True:
                 # self.progress_bar.close()
                 y_preds = np.apply_along_axis(self.feedforward, 1, data)
@@ -193,32 +219,22 @@ def make_network(input_size, layers_sizes, output_size):
 
 # data = np.array([[133, 65], [160, 72], [152, 70], [120, 60]])
 #
-# # F M
 # all_y_trues = np.array([
-#     np.array([1, 0]),  # Alice
-#     np.array([0, 1]),  # Bob
-#     np.array([0, 1]),  # Charlie
-#     np.array([1, 0]),  # Diana
+#     [1],  # Alice
+#     [0],  # Bob
+#     [0],  # Charlie
+#     [1],  # Diana
 # ])
 #
 # # Тренируем нашу нейронную сеть!
-# network = make_network(2, [20, 20], 2)
-# network.train(data, all_y_trues, 5000, 0.005)
-#
-# emily = np.array([128, 63])  # 128 pounds, 63 inches
-# frank = np.array([155, 68])  # 155 pounds, 68 inches
-#
-# emily_res = network.feedforward(emily)
-# frank_res = network.feedforward(frank)
-#
-# print(emily_res)
-# print(frank_res)
+# network = make_network(2, [20, 20], 1)
+# network.train(data, all_y_trues, 2000, 0.01)
+# quit()
 
 
 data_file = open('./mnist_test/mnist_train.csv','r')
 training_list = data_file.readlines()
 data_file.close()
-
 
 
 dataset = list()
@@ -241,10 +257,7 @@ network = make_network(784, [20, 20], 10)
 
 print("training network")
 
-pool = Pool()
-network.train(dataset, trues, 20, 0.1)
-
-pool.close()
+network.train(dataset, trues, 50, 0.1)
 
 print("training done")
 
@@ -280,3 +293,11 @@ for line in test_lines:
     # print("res: " + str(get_number(res)), res, "answer: " + str(target), sep="\n")
 
 print(str(right_guesses) + '/' + str(all_guesses), str(right_guesses / all_guesses * 100) + '%')
+
+
+def evaluate_drawing(data):
+    print(get_number(network.feedforward(data)))
+
+
+paint = Paint(evaluate_drawing)
+paint.window.mainloop()
