@@ -1,2 +1,5 @@
 /mnist_test
-cude_test.py
+.idea/
+__pycache__/
+./cude_test.py
+Network.py
