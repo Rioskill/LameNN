@@ -1,6 +1,5 @@
 import numpy as np
 
-
 alpha = 0.1
 
 def sigmoid(x):
@@ -39,12 +38,11 @@ class Neuron:
         self.last_deltas = GRADs * learn_rate + alpha * self.last_deltas
         self.weights += self.last_deltas
 
-        # biasGRAD = self.bias * self_d
-        # self.bias += biasGRAD * learn_rate
+        input_sum = deriv_sigmoid(self.get_input(input_neuron_outputs))
 
-        input_neuron_ds = np.array([weight * self_d * deriv_sigmoid(input_neuron_output)
-                                    for weight, input_neuron_output
-                                    in zip(self.weights, input_neuron_outputs)])
+        self.weights += learn_rate * self_d * input_sum
+
+        input_neuron_ds = np.array(self.weights) * self_d * input_sum
 
         return np.array(input_neuron_ds)
 
@@ -69,13 +67,11 @@ class Layer:
 
 
 class NeuralNetwork:
-    def __init__(self, layers=None):
-        if layers is None:
-            self.hidden_layers = [Layer(2, 2)]
-        else:
-            self.hidden_layers = layers
+    def __init__(self, input_layer_size, layers, output_layer_size):
+        self.input_layer_size = input_layer_size
+        self.hidden_layers = layers
 
-        self.o = Neuron(self.hidden_layers[-1].size())
+        self.o = Layer(self.hidden_layers[-1].size(), output_layer_size)
 
     def feedforward(self, x):
         out = np.array(x)
@@ -98,7 +94,7 @@ class NeuralNetwork:
                 d_o = (y_true - o_output) * deriv_sigmoid(o_output)
 
                 d_layer = (self.o.train(input_neuron_outputs=outputs[-1],
-                                        self_d=d_o,
+                                        neuron_ds=d_o,
                                         learn_rate=learn_rate))
 
                 for layer, input_neuron_output in zip(self.hidden_layers[::-1], outputs[-2::-1]):
@@ -106,51 +102,74 @@ class NeuralNetwork:
                                           neuron_ds=d_layer,
                                           learn_rate=learn_rate)
 
-            if epoch % 10 == 0:
-                y_preds = np.apply_along_axis(self.feedforward, 1, data)
-                loss = mse_loss(y_trues, y_preds)
-                print("Epoch %d loss: %.3f" % (epoch, loss))
+            y_preds = np.apply_along_axis(self.feedforward, 1, data)
+            loss = mse_loss(y_trues, y_preds)
+            print("Epoch %d loss: %.3f" % (epoch, loss))
 
 
-def make_network(input_size, layers_sizes):
+def make_network(input_size, layers_sizes, output_size):
     neuron_layers = list()
     for size in layers_sizes:
         neuron_layers.append(Layer(input_size, size))
         input_size = size
-    return NeuralNetwork(neuron_layers)
+    return NeuralNetwork(input_size, neuron_layers, output_size)
 
 
-data = np.array([[133, 65], [160, 72], [152, 70], [120, 60]])
-
-all_y_trues = np.array([
-    1,  # Alice
-    0,  # Bob
-    0,  # Charlie
-    1,  # Diana
-])
-
-# Тренируем нашу нейронную сеть!
-network = make_network(2, [20, 20])
-network.train(data, all_y_trues, 5000, 0.005)
-
-emily = np.array([128, 63])  # 128 pounds, 63 inches
-frank = np.array([155, 68])  # 155 pounds, 68 inches
-
-emily_res = network.feedforward(emily)
-frank_res = network.feedforward(frank)
+data_file = open('mnist_train.csv','r')
+training_list = data_file.readlines()[:100]
+data_file.close()
 
 
-def number_to_sex(number):
-    if number >= 0.5:
-        return 'F'
-    return 'M'
+dataset = list()
+trues = list()
+print("making dataset")
+
+for record in training_list:
+    all_values = record.split(',')
+    inputs = (np.asfarray(all_values[1:]) / 255.0 * 0.99) + 0.01
+    targets = np.zeros(10) + 0.01
+    targets[int(all_values[0])] = 0.99
+
+    dataset.append(inputs)
+    trues.append(targets)
+
+dataset = np.array(dataset)
+trues = np.array(trues)
+
+network = make_network(784, [20, 20], 10)
+
+print("training network")
+
+network.train(dataset, trues, 5, 0.1)
+
+print("training done")
 
 
-print("Emily: %.3f" % emily_res, number_to_sex(emily_res))
-print("Frank: %.3f" % frank_res, number_to_sex(frank_res))
+def get_number(network_output):
+    max_num = 0
+    max_pos = -1
+    for i, number in enumerate(network_output):
+        if number > max_num:
+            max_num = number
+            max_pos = i
+    return max_pos
 
-while True:
-    mass, height = map(int, input().split())
 
-    res = network.feedforward(np.array([mass, height]))
-    print("%.3f" % res, number_to_sex(res))
+test_file = open('mnist_test.csv', 'r')
+test_lines = test_file.readlines()
+test_file.close()
+
+right_guesses = 0
+all_guesses = len(test_lines)
+
+for line in test_lines:
+    arr = line.split(',')
+    target = int(arr[0])
+    inputs = np.asfarray(arr[1:])
+    guess = network.feedforward(inputs)
+    guessed_number = get_number(guess)
+
+    if guessed_number == target:
+        right_guesses += 1
+
+print(str(right_guesses) + '/' + str(all_guesses), str(right_guesses / all_guesses * 100) + '%')
