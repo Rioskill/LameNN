@@ -33,14 +33,14 @@ class Neuron:
 
     def train(self, input_neuron_outputs, self_d, learn_rate):
 
-        GRADs = np.array([input_neuron_output * self_d for input_neuron_output in input_neuron_outputs])
+        #GRADs = np.array([input_neuron_output * self_d for input_neuron_output in input_neuron_outputs])
 
-        self.last_deltas = GRADs * learn_rate + alpha * self.last_deltas
-        self.weights += self.last_deltas
+        #self.last_deltas = GRADs * learn_rate + alpha * self.last_deltas
+        #self.weights += self.last_deltas
 
         input_sum = deriv_sigmoid(self.get_input(input_neuron_outputs))
 
-        self.weights += learn_rate * self_d * input_sum
+        self.weights += learn_rate * input_neuron_outputs * self_d * input_sum
 
         input_neuron_ds = np.array(self.weights) * self_d * input_sum
 
@@ -91,7 +91,7 @@ class NeuralNetwork:
 
                 o_output = self.o.feedforward(outputs[-1])
 
-                d_o = (y_true - o_output) * deriv_sigmoid(o_output)
+                d_o = 2 * (y_true - o_output) * deriv_sigmoid(o_output)
 
                 d_layer = (self.o.train(input_neuron_outputs=outputs[-1],
                                         neuron_ds=d_o,
@@ -104,7 +104,7 @@ class NeuralNetwork:
 
             y_preds = np.apply_along_axis(self.feedforward, 1, data)
             loss = mse_loss(y_trues, y_preds)
-            print("Epoch %d loss: %.3f" % (epoch, loss))
+            print("Epoch %d loss: %.3f" % (epoch + 1, loss))
 
 
 def make_network(input_size, layers_sizes, output_size):
@@ -116,7 +116,7 @@ def make_network(input_size, layers_sizes, output_size):
 
 
 data_file = open('mnist_train.csv','r')
-training_list = data_file.readlines()[:100]
+training_list = data_file.readlines()[:1000]
 data_file.close()
 
 
@@ -136,11 +136,11 @@ for record in training_list:
 dataset = np.array(dataset)
 trues = np.array(trues)
 
-network = make_network(784, [20, 20], 10)
+network = make_network(784, [40, 40], 10)
 
 print("training network")
 
-network.train(dataset, trues, 5, 0.1)
+network.train(dataset, trues, 5, 0.3)
 
 print("training done")
 
