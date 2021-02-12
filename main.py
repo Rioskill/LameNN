@@ -1,7 +1,5 @@
 import numpy as np
 import sys
-from multiprocessing import Pool
-from itertools import repeat
 
 
 class ProgressBar:
@@ -32,7 +30,6 @@ class ProgressBar:
 
     def close(self):
         sys.stdout.write("]\n")  # this ends the progress bar
-
 
 alpha = 0.1
 
@@ -67,33 +64,10 @@ class Neuron:
         return sigmoid(self.get_input(inputs))
 
     def train(self, input_neuron_outputs, self_d, learn_rate):
-
-        GRADs = np.array([input_neuron_output * self_d for input_neuron_output in input_neuron_outputs])
-
-        self.last_deltas = GRADs * learn_rate + alpha * self.last_deltas
-        self.weights += self.last_deltas
-
-        # biasGRAD = self.bias * self_d
-        # self.bias += biasGRAD * learn_rate
-
-        input_neuron_ds = np.array([weight * self_d * deriv_sigmoid(input_neuron_output)
-                                    for weight, input_neuron_output
-                                    in zip(self.weights, input_neuron_outputs)])
-
+        input_sum = deriv_sigmoid(self.get_input(input_neuron_outputs))
+        self.weights += learn_rate * input_neuron_outputs * self_d * input_sum
+        input_neuron_ds = np.array(self.weights) * self_d * input_sum
         return np.array(input_neuron_ds)
-
-
-def train_neuron(data):
-    neuron = data[0]
-    input_neuron_outputs = data[1]
-    neuron_d = data[2]
-    learn_rate = data[3]
-
-    ds = neuron.train(input_neuron_outputs=input_neuron_outputs,
-                      self_d=neuron_d,
-                      learn_rate=learn_rate)
-
-    return neuron, ds
 
 
 class Layer:
@@ -108,19 +82,10 @@ class Layer:
 
     def train(self, input_neuron_outputs, neuron_ds, learn_rate):
         d_previous_layer = np.array([0.0 for i in range(len(input_neuron_outputs))])
-        # for neuron, neuron_d in zip(self.neurons, neuron_ds):
-        #     d_previous_layer += neuron.train(input_neuron_outputs=input_neuron_outputs,
-        #                                      self_d=neuron_d,
-        #                                      learn_rate=learn_rate)
-
-        pool_res = pool.map(train_neuron, zip(self.neurons, repeat(input_neuron_outputs), neuron_ds, repeat(learn_rate)))
-
-        self.neurons = []
-
-        for neuron, ds in pool_res:
-            self.neurons.append(neuron)
-            d_previous_layer += ds
-
+        for neuron, neuron_d in zip(self.neurons, neuron_ds):
+            d_previous_layer += neuron.train(input_neuron_outputs=input_neuron_outputs,
+                                             self_d=neuron_d,
+                                             learn_rate=learn_rate)
         return d_previous_layer
 
 
@@ -128,10 +93,6 @@ class NeuralNetwork:
     def __init__(self, input_layer_size, layers, output_layer_size):
         self.input_layer_size = input_layer_size
         self.hidden_layers = layers
-
-        # self.progress_bar = ProgressBar(20, 100)
-
-        # self.o = Neuron(self.hidden_layers[-1].size())
 
         self.o = Layer(self.hidden_layers[-1].size(), output_layer_size)
 
@@ -144,7 +105,6 @@ class NeuralNetwork:
         return out_o
 
     def train(self, data, y_trues, epochs=1000, learn_rate=0.01):
-        # self.progress_bar.begin()
         for epoch in range(epochs):
 
             for inputs, y_true in zip(data, y_trues):
@@ -155,11 +115,7 @@ class NeuralNetwork:
 
                 o_output = self.o.feedforward(outputs[-1])
 
-                d_o = list()
-                for output, true in zip(o_output, y_true):
-                    d_o.append((true - output) * deriv_sigmoid(output))
-
-                d_o = np.array(d_o)
+                d_o = 2 * (y_true - o_output) * deriv_sigmoid(o_output)
 
                 d_layer = (self.o.train(input_neuron_outputs=outputs[-1],
                                         neuron_ds=d_o,
@@ -170,17 +126,9 @@ class NeuralNetwork:
                                           neuron_ds=d_layer,
                                           learn_rate=learn_rate)
 
-            # self.progress_bar.update()
-
-            #if epoch % 1 == 0:
-            if True:
-                # self.progress_bar.close()
-                y_preds = np.apply_along_axis(self.feedforward, 1, data)
-                loss = mse_loss(y_trues, y_preds)
-                print("Epoch %d loss: %.3f" % (epoch, loss))
-
-                # self.progress_bar.begin()
-        # self.progress_bar.close()
+            y_preds = np.apply_along_axis(self.feedforward, 1, data)
+            loss = mse_loss(y_trues, y_preds)
+            print("Epoch %d loss: %.3f" % (epoch + 1, loss))
 
 
 def make_network(input_size, layers_sizes, output_size):
@@ -190,42 +138,16 @@ def make_network(input_size, layers_sizes, output_size):
         input_size = size
     return NeuralNetwork(input_size, neuron_layers, output_size)
 
-
-# data = np.array([[133, 65], [160, 72], [152, 70], [120, 60]])
-#
-# # F M
-# all_y_trues = np.array([
-#     np.array([1, 0]),  # Alice
-#     np.array([0, 1]),  # Bob
-#     np.array([0, 1]),  # Charlie
-#     np.array([1, 0]),  # Diana
-# ])
-#
-# # Тренируем нашу нейронную сеть!
-# network = make_network(2, [20, 20], 2)
-# network.train(data, all_y_trues, 5000, 0.005)
-#
-# emily = np.array([128, 63])  # 128 pounds, 63 inches
-# frank = np.array([155, 68])  # 155 pounds, 68 inches
-#
-# emily_res = network.feedforward(emily)
-# frank_res = network.feedforward(frank)
-#
-# print(emily_res)
-# print(frank_res)
-
-
 data_file = open('./mnist_test/mnist_train.csv','r')
 training_list = data_file.readlines()
 data_file.close()
-
 
 
 dataset = list()
 trues = list()
 print("making dataset")
 
-for record in training_list[:1000]:
+for record in training_list:
     all_values = record.split(',')
     inputs = (np.asfarray(all_values[1:]) / 255.0 * 0.99) + 0.01
     targets = np.zeros(10) + 0.01
@@ -237,14 +159,11 @@ for record in training_list[:1000]:
 dataset = np.array(dataset)
 trues = np.array(trues)
 
-network = make_network(784, [20, 20], 10)
+network = make_network(784, [40, 40], 10)
 
 print("training network")
 
-pool = Pool()
-network.train(dataset, trues, 20, 0.1)
-
-pool.close()
+network.train(dataset, trues, 5, 0.3)
 
 print("training done")
 
@@ -273,10 +192,8 @@ for line in test_lines:
     guess = network.feedforward(inputs)
     guessed_number = get_number(guess)
 
-    # print(guessed_number, target, guessed_number == target)
     if guessed_number == target:
         right_guesses += 1
 
-    # print("res: " + str(get_number(res)), res, "answer: " + str(target), sep="\n")
 
 print(str(right_guesses) + '/' + str(all_guesses), str(right_guesses / all_guesses * 100) + '%')
